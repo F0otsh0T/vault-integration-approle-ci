@@ -1,0 +1,298 @@
+name: GitHub Actions Test - Vault
+on: [push]
+jobs:
+############################################################################################################
+# JOB:
+#   - Use GitHub Actions JWT Token to Login to Vault JWT Auth
+#   - Retrieve AppRole `roleid` and wrapped `secretid`
+#   - Build Application Image with AppRole `roleid` and wrapped `secretid`
+# PERSONA: Trusted Broker or Orchestrator (CI Runner)
+#
+  trusted_broker_ci_vault_approle_build_app:
+    name: "Trusted Broker / CI Build AppRole Application"
+    runs-on: ubuntu-latest
+    outputs:
+        TKN: ${{ steps.log_in_to_vault.outputs.VAULT_TOKEN }}
+        TKN_ACCSSR: ${{ steps.log_in_to_vault.outputs.VAULT_TOKEN_ACCESSOR }}
+        WRAPPED: ${{ steps.ci_runner_retrieve_vault_approle_auth.outputs.WRAPPED_TOKEN }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+#### [STEP] Check Out Repository
+      - name: Check Out Repository
+        uses: actions/checkout@v4
+#### [STEP][DEBUG] Show Repository
+      - name: Show Repository
+        run: |
+            ls -al
+#### [STEP][DEBUG] Show GitHub ID_TOKEN REQUEST_TOKEN and REQUEST_URL
+      - name: Show GitHub ID_TOKEN REQUEST_TOKEN and REQUEST_URL
+        run: |
+            echo -e "ACTIONS_ID_TOKEN_REQUEST_TOKEN:" $ACTIONS_ID_TOKEN_REQUEST_TOKEN
+            echo -e "ACTIONS_ID_TOKEN_REQUEST_URL:" $ACTIONS_ID_TOKEN_REQUEST_URL
+#### [STEP][DEBUG] Show GitHub JWT Token Claims
+      - name: Show GitHub JWT Token Claims
+        # https://github.com/ned1313/vault-oidc-github-actions/blob/main/.github/workflows/oidc_test.yml
+        # https://sierrasoftworks.com/2021/12/20/vault-github-actions/#policies
+        run: |
+            # echo -e "VAULT_ADDR:" $VAULT_ADDR
+            # echo -e "VAULT_AUTH_JWT_GITHUB_ROLE:" $VAULT_AUTH_JWT_GITHUB_ROLE
+            # echo -e "VAULT_NAMESPACE:" $VAULT_NAMESPACE
+            # echo -e "VAULT_AUTH_JWT_GITHUB_PATH:" $VAULT_AUTH_JWT_GITHUB_PATH
+
+            # Harvest GitHub Actions JWT Token
+            curl -sSL -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL" | \
+            jq "{ jwt: .value, role: \"$VAULT_AUTH_JWT_GITHUB_ROLE\" }" > ./token.json
+            
+            echo 'GitHub Actions Token Claims:'
+            cat ./token.json | jq -r '.jwt | split(".") | .[1] | @base64d' | jq
+        env:
+            VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+            VAULT_AUTH_JWT_GITHUB_PATH: ${{ secrets.VAULT_AUTH_JWT_GITHUB_PATH }}
+            VAULT_AUTH_JWT_GITHUB_ROLE: ${{ secrets.VAULT_AUTH_JWT_GITHUB_ROLE }}
+            VAULT_NAMESPACE: ${{ secrets.VAULT_NAMESPACE }}
+#### [STEP] Log in to Vault
+      - name: Log in to Vault
+        id: log_in_to_vault
+        run: |
+            # Login to Vault and Show Login Response
+            echo 'Vault Login Response:'
+            curl -sSLf -X POST -H "Content-Type: application/json" -H "X-Vault-Namespace: $VAULT_NAMESPACE" --data @token.json $VAULT_ADDR/v1/auth/$VAULT_AUTH_JWT_GITHUB_PATH/login | jq > login.json
+            # [DEBUG] Show Login JSON
+            cat ./login.json | jq
+
+
+            # ## Output Token JSON
+            # ## [DEBUG] Show Token JSON
+            echo 'Vault Token JSON:'
+            cat ./token.json | jq
+
+            # Process Login Token and Accessor:
+            cat ./login.json | jq -r '.auth | { token: .client_token, accessor: .accessor }' > ./login-token.json
+
+            # ## Output Login Token JSON
+            # ## [DEBUG] Show Login Token JSON
+            echo 'Vault Login Token JSON:'
+            cat ./login-token.json | jq
+
+            ## VAULT_TOKEN - Save Token to GitHub Actions Output for future use
+            TOKEN=$(cat ./login-token.json | jq -r '.token')
+            ## [DEBUG] Show Token
+            echo -e "TOKEN:" $TOKEN
+            echo "::add-mask::$TOKEN"
+            ## Output Login Token to GitHub Actions Output File `$GITHUB_OUTPUT`
+            echo "VAULT_TOKEN=$TOKEN" >> $GITHUB_OUTPUT
+            ## Output Login Token to GitHub Actions Environment File `$GITHUB_ENV`
+            # echo "VAULT_TOKEN=$(cat ./login-token.json | jq -r '.token')" >> $GITHUB_ENV
+            # echo "VAULT_TOKEN=$TOKEN" >> $GITHUB_ENV
+            
+
+            ## VAULT_TOKEN_ACCESSOR - Save Token Accessor to GitHub Actions Output for future use
+            TOKEN_ACCESSOR=$(cat ./login-token.json | jq -r '.accessor')
+            ## [DEBUG] Show Token Accessor
+            echo -e "TOKEN_ACCESSOR:" $TOKEN_ACCESSOR
+            echo "::add-mask::$TOKEN_ACCESSOR"
+            echo "VAULT_TOKEN_ACCESSOR=$TOKEN_ACCESSOR" >> $GITHUB_OUTPUT
+            ## Output Login Accessor to GitHub Actions Environment File `$GITHUB_ENV`
+            # echo "VAULT_TOKEN_ACCESSOR=$(cat ./login-token.json | jq -r '.accessor')" >> $GITHUB_ENV
+            # echo "VAULT_TOKEN_ACCESSOR=$TOKEN_ACCESSOR" >> $GITHUB_ENV
+            
+            ## [DEBUG] Show GitHub Actions Environment File
+            echo -e "GITHUB_ENV:"
+            echo $GITHUB_ENV
+            # cat $GITHUB_ENV
+
+            ## [DEBUG] Show GitHub Actions Output File
+            echo -e "GITHUB_OUTPUT:"
+            echo $GITHUB_OUTPUT
+            # cat $GITHUB_OUTPUT
+
+            # Remove files when we're done (if we don't fail)
+            rm ./token.json
+            rm ./login.json
+            rm ./login-token.json
+        env:
+            VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+            VAULT_AUTH_JWT_GITHUB_PATH: ${{ secrets.VAULT_AUTH_JWT_GITHUB_PATH }}
+            VAULT_AUTH_JWT_GITHUB_ROLE: ${{ secrets.VAULT_AUTH_JWT_GITHUB_ROLE }}
+            VAULT_NAMESPACE: ${{ secrets.VAULT_NAMESPACE }}
+#### [STEP] Install Vault CLI and Binaries
+      - name: Install Vault CLI and Binaries
+        uses: cpanato/vault-installer@main
+        with:
+          vault-release: '1.16.3'
+      ## [DEBUG] Check Vault CLI and Binaries Install
+    #   - name: Check Vault CLI and Binaries Install
+    #     run: |
+    #         vault version
+
+    #         echo -e "VAULT_TOKEN:" $VAULT_TOKEN
+    #         echo -e "VAULT_TOKEN_ACCESSOR:" $VAULT_TOKEN_ACCESSOR
+    #         echo -e "VAULT_ADDR:" $VAULT_ADDR
+
+    #         # env | grep -i vault
+
+    #         export VAULT_TOKEN=$VAULT_TOKEN
+    #         export VAULT_ADDR=$VAULT_ADDR
+    #         export VAULT_NAMESPACE=$VAULT_NAMESPACE
+
+    #         ## [DEBUG] Test Vault CLI
+    #         vault auth list
+    #     env:
+    #         VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+    #         VAULT_AUTH_JWT_GITHUB_PATH: ${{ secrets.VAULT_AUTH_JWT_GITHUB_PATH }}
+    #         VAULT_AUTH_JWT_GITHUB_ROLE: ${{ secrets.VAULT_AUTH_JWT_GITHUB_ROLE }}
+    #         VAULT_NAMESPACE: ${{ secrets.VAULT_NAMESPACE }}
+    #         # VAULT_TOKEN: ${{ env.VAULT_TOKEN }}
+    #         VAULT_TOKEN: ${{ steps.log_in_to_vault.outputs.VAULT_TOKEN }}
+    #         # VAULT_TOKEN: ${{ needs.github_actions_login_to_vault_jwt_auth.outputs.VAULT_TOKEN }}
+    #         # VAULT_TOKEN_ACCESSOR: ${{ env.VAULT_TOKEN_ACCESSOR }}
+    #         VAULT_TOKEN_ACCESSOR: ${{ steps.log_in_to_vault.outputs.VAULT_TOKEN_ACCESSOR }}
+    #         # VAULT_TOKEN_ACCESSOR: ${{ needs.github_actions_login_to_vault_jwt_auth.outputs.VAULT_TOKEN_ACCESSOR }}
+#### [STEP] CI Runner Retrieve Vault AppRole Auth
+      - name: CI Runner Retrieve Vault AppRole Auth
+        id: ci_runner_retrieve_vault_approle_auth
+        run: |
+            # Export Vault Environment Variables
+            export VAULT_TOKEN=$VAULT_TOKEN
+            export VAULT_ADDR=$VAULT_ADDR
+            export VAULT_NAMESPACE=$VAULT_NAMESPACE
+
+            echo -e "VAULT_AUTH_APPROLE_ROLE:" $VAULT_AUTH_APPROLE_ROLE
+
+            ## [DEBUG] AppRole RoleID Read
+            ## vault write -f auth/approle/role/$VAULT_AUTH_JWT_GITHUB_ROLE/secret-id
+            vault read -format=json auth/$VAULT_AUTH_APPROLE_PATH/role/$VAULT_AUTH_APPROLE_ROLE/role-id | jq > approle_role.json
+            cat approle_role.json
+            cat approle_role.json | jq -r '.data' > roleid_read.json
+            cat roleid_read.json | jq -r '.role_id' > roleid_read.txt
+            cat roleid_read.txt
+            ##
+            echo -e "RoleID from Terraform:" ${{ secrets.SECRET_ROLEID }}
+            echo ${{ secrets.SECRET_ROLEID }} >> roleid_tf.txt
+            cat roleid_tf.txt
+            echo "READ_ROLEID=$(cat roleid_tf.txt)" >> $GITHUB_OUTPUT
+            ##
+            which diff
+            diff roleid_read.txt roleid_tf.txt > diff.txt
+            cat diff.txt
+
+            ##
+            # Retrieve AppRole wrapped `secretid` with `roleid` from TF<=>GitHub Actions
+            echo 'Retrieve AppRole wrapped `secretid`'
+            # vault write -format=json -wrap-ttl=60s -force auth/$VAULT_AUTH_APPROLE_PATH/role/$VAULT_AUTH_APPROLE_ROLE/secret-id | jq > secretid.json
+            vault write -format=json -wrap-ttl=1800s -force auth/$VAULT_AUTH_APPROLE_PATH/role/$VAULT_AUTH_APPROLE_ROLE/secret-id | jq > secretid.json
+            cat secretid.json | jq -r '.wrap_info' > secretid_wrap.json
+            ## [DEBUG] Show Wrapped Token
+            cat secretid.json | jq
+            cat secretid_wrap.json | jq -r '.token' > secretid_wrap.txt
+            cat secretid_wrap.txt
+
+            WRAPPED=$(cat secretid_wrap.json | jq -r '.token')
+            ## [DEBUG] Show Wrapped Token
+            # echo -e "WRAPPED:" $WRAPPED
+            echo "::add-mask::$WRAPPED"
+            echo "WRAPPED_TOKEN=$WRAPPED" >> $GITHUB_OUTPUT
+
+            ## [DEBUG] Unwrap for Verification / Debugging
+            # # Retrieve AppRole `secretid` with `WRAPPED_TOKEN`
+            # VAULT_TOKEN=$WRAPPED vault unwrap -format=json | jq > unwrapped.json
+            # cat unwrapped.json | jq
+        env:
+            VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+            VAULT_AUTH_JWT_GITHUB_PATH: ${{ secrets.VAULT_AUTH_JWT_GITHUB_PATH }}
+            VAULT_AUTH_JWT_GITHUB_ROLE: ${{ secrets.VAULT_AUTH_JWT_GITHUB_ROLE }}
+            VAULT_NAMESPACE: ${{ secrets.VAULT_NAMESPACE }}
+            VAULT_TOKEN: ${{ steps.log_in_to_vault.outputs.VAULT_TOKEN }}
+            VAULT_TOKEN_ACCESSOR: ${{ steps.log_in_to_vault.outputs.VAULT_TOKEN_ACCESSOR }}
+            VAULT_AUTH_APPROLE_PATH: ${{ secrets.VAULT_AUTH_APPROLE_PATH }}
+            VAULT_AUTH_APPROLE_ROLE: ${{ secrets.VAULT_AUTH_APPROLE_ROLE }}
+#### [STEP] Docker Log In
+      - name: Docker Login
+        id: docker_login
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USER }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+#### [STEP] Docker QEMU
+      - name: Set up Docker QEMU
+        uses: docker/setup-qemu-action@v3
+#### [STEP] Docker BuildX
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+#### [STEP] Build Application Container Image
+      - name: Build Application Container Image
+        id: build_application_image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          # push: false
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USER }}/demo:${{ github.sha }}
+            ${{ secrets.DOCKER_USER }}/demo:approle_secret_zero
+            ${{ secrets.DOCKER_USER }}/demo:latest
+          build-args: |
+            "VAULT_ADDR=${{ secrets.VAULT_ADDR }}"
+            "VAULT_NAMESPACE=${{ secrets.VAULT_NAMESPACE}}"
+            "VAULT_AUTH_APPROLE_PATH=${{ secrets.VAULT_AUTH_APPROLE_PATH }}"
+            "VAULT_AUTH_APPROLE_ROLE=${{ secrets.VAULT_AUTH_APPROLE_ROLE }}"
+            "VAULT_AUTH_APPROLE_ROLEID=${{ secrets.SECRET_ROLEID }}"
+            "WRAPPED_TOKEN=${{ steps.ci_runner_retrieve_vault_approle_auth.outputs.WRAPPED_TOKEN }}"
+            "PRODUCT=vault"
+            "VERSION=1.6.3"
+            "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            "VCS_REF=${{ github.sha }}"
+            "VAULT_READ_ROLEID=${{ steps.ci_runner_retrieve_vault_approle_auth.outputs.READ_ROLEID }}"
+          platforms: | # multi-platform build - must be in set from source image platform from Dockerfile
+            linux/amd64
+            linux/arm64
+            linux/arm/v7
+            linux/arm/v6
+        env:
+          DOCKER_USER: ${{ secrets.DOCKER_USER }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+      
+
+############################################################################################################
+# JOB:
+#   - Unwrap `secretid`
+#   - Log in to Vault AppRole Auth with `roleid` and `secretid`
+#   - Retrieve Secrets for Application
+# PERSONA: Application
+#
+  app_retrieve_secrets:
+    name: "Application Retrieve Secrets with AppRole Auth Login Token"
+    needs: trusted_broker_ci_vault_approle_build_app
+    runs-on: ubuntu-latest
+    # outputs:
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+#### [STEP] Check Out Repository
+      - name: Check Out Repository
+        uses: actions/checkout@v4
+#### [STEP][DEBUG] Show Repository
+      - name: Show Repository
+        run: |
+            ls -al
+#### [STEP] Run Application and Retrieve Secrets
+      - name: Run Application
+        uses: addnab/docker-run-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+          image: hcpf0otsh0t/demo:latest
+          run: |
+            echo "Running Application"
+            sh /app/app.sh
+
+
+
+
