@@ -1,5 +1,5 @@
 ---
-title: HashiCorp Vault Integration - AppRole Auth <=> GitHub Actions CI Integration
+title: HashiCorp Vault Integration - Application AppRole <=> GitHub Actions CI
 description: Integrations HashiCorp Vault with GitHub Actions CI Platform
 ---
 
