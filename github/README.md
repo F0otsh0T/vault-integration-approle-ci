@@ -7,6 +7,8 @@ description: Integrations HashiCorp Vault with GitHub Actions CI Platform
 
 ---
 
+OIDC between GitHub and Vault and then AppRole for the Actions run.
+
 ## REQUIREMENTS
 #### HASHICORP
 - [HashiCorp Vault](https://www.hashicorp.com/products/vault) & [Vault CLI](https://developer.hashicorp.com/vault/tutorials/getting-started/getting-started-install)
